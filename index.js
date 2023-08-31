@@ -7,65 +7,155 @@ app.use(express.static(__dirname + '/public'));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-// * Please include the private app access token in your repo BUT only an access token built in a TEST ACCOUNT. Don't do this practicum in your normal account.
-const PRIVATE_APP_ACCESS = '';
 
-// TODO: ROUTE 1 - Create a new app.get route for the homepage to call your custom object data. Pass this data along to the front-end and create a new pug template in the views folder.
+const PRIVATE_APP_ACCESS = 'pat-eu1-e223cb8c-b635-4701-bd31-de38036ff098';
+const headers = {
+    Authorization: `Bearer ${PRIVATE_APP_ACCESS}`,
+    'Content-Type': 'application/json'
+};
+const CUSTOM_OBJECT_NAME = 'competition';
 
-// * Code for Route 1 goes here
-
-// TODO: ROUTE 2 - Create a new app.get route for the form to create or update new custom object data. Send this data along in the next route.
-
-// * Code for Route 2 goes here
-
-// TODO: ROUTE 3 - Create a new app.post route for the custom objects form to create or update your custom object data. Once executed, redirect the user to the homepage.
-
-// * Code for Route 3 goes here
-
-/** 
-* * This is sample code to give you a reference for how you should structure your calls. 
-
-* * App.get sample
-app.get('/contacts', async (req, res) => {
-    const contacts = 'https://api.hubspot.com/crm/v3/objects/contacts';
-    const headers = {
-        Authorization: `Bearer ${PRIVATE_APP_ACCESS}`,
-        'Content-Type': 'application/json'
-    }
-    try {
-        const resp = await axios.get(contacts, { headers });
-        const data = resp.data.results;
-        res.render('contacts', { title: 'Contacts | HubSpot APIs', data });      
-    } catch (error) {
-        console.error(error);
-    }
+// ROUTE 1 - Create a new app.get route for the homepage to call your custom object data. Pass this data along to the front-end and create a new pug template in the views folder.
+app.get('/', async (req, res) => {
+    const objectId = await checkCustomObject();
+    const data = await getCustomObject(objectId);
+    
+    res.render('homepage', { title: 'Index', data, objectId });
 });
 
-* * App.post sample
-app.post('/update', async (req, res) => {
-    const update = {
-        properties: {
-            "favorite_book": req.body.newVal
-        }
+// ROUTE 2 - Create a new app.get route for the form to create or update new custom object data. Send this data along in the next route.
+
+app.get('/update-cobj', async (req, res) => {
+    const objectId = req.query.id;
+
+    if (!objectId) {
+        const objectId = await checkCustomObject();
+        res.redirect(301, `/update-cobj?id=${objectId}`);
     }
 
-    const email = req.query.email;
-    const updateContact = `https://api.hubapi.com/crm/v3/objects/contacts/${email}?idProperty=email`;
-    const headers = {
-        Authorization: `Bearer ${PRIVATE_APP_ACCESS}`,
-        'Content-Type': 'application/json'
-    };
+    res.render('updates', { title: 'Update Custom Object Form | Integrating With HubSpot I Practicum.'});
+});
+
+// ROUTE 3 - Create a new app.post route for the custom objects form to create or update your custom object data. Once executed, redirect the user to the homepage.
+
+app.post('/update-cobj', async (req, res) => {
+    const update = {
+        properties: {
+            "name": req.body.name,
+            "winner": req.body.winner,
+            "looser": req.body.looser
+        }
+    }
+    const objectId = req.query.id;
+    const custom = `https://api.hubspot.com/crm/v3/objects/${objectId}`;
 
     try { 
-        await axios.patch(updateContact, update, { headers } );
-        res.redirect('back');
+        await axios.post(custom, update, { headers } );
+        res.redirect(301, '/');
     } catch(err) {
         console.error(err);
     }
 
 });
-*/
-
 
 // * Localhost
-app.listen(3000, () => console.log('Listening on http://localhost:3000'));
+app.listen(3000, () => console.log('-> http://localhost:3000'));
+
+
+const checkCustomObject = async () => {
+    const custom = `https://api.hubspot.com/crm/v3/schemas`;
+    try {
+        const { data } = await axios.get(custom, { headers });
+
+        if (data.results) {
+            const competitions = data.results.filter(x => x.fullyQualifiedName && x.fullyQualifiedName.toLowerCase().includes(CUSTOM_OBJECT_NAME));
+            
+            let objectId;
+            // haven't custom object
+            if (competitions.length === 0) 
+            {
+                // then create it
+                const results = await createCustomObject();
+                objectid = results.objectTypeId;
+            } else {
+                objectId = competitions[0].objectTypeId;
+            }
+
+            return objectId;
+        }
+    } catch (error) {
+        if (error.response && error.response.status === 400) {
+            // if error means no custom object, then create it
+            const results = createCustomObject();
+            return results.objectTypeId;   
+        }
+    }
+
+    return false;
+};
+
+const createCustomObject = async () => {
+    const custom = `https://api.hubspot.com/crm/v3/schemas`;
+    const customObject = {
+        "name": "Competitions",
+        "labels": {
+            "singular": "Competition",
+            "plural": "Competitions"
+        },
+        "properties": [
+            {
+                "name": "name",
+                "label": "Name",
+                "type": "string",
+                "fieldType": "text",
+                "archived": false,
+                "hasUniqueValue": false
+            },
+            {
+                "name": "winner",
+                "label": "Winner",
+                "type": "string",
+                "fieldType": "text",
+                "archived": false,
+                "hasUniqueValue": false
+            },
+            {
+                "name": "looser",
+                "label": "Looser",
+                "type": "string",
+                "fieldType": "text",
+                "archived": false,
+                "hasUniqueValue": false
+            },
+        ],
+        "primaryDisplayProperty": "name",
+        "associatedObjects": [
+            "CONTACT"
+        ],
+    };
+
+    try {
+        const { data } = await axios.post(custom, customObject, { headers });
+        return data.results;
+    } catch (error) {
+        console.error(error);
+    }
+};
+
+const getCustomObject = async (objectId) => {
+    const params = new URLSearchParams();
+    params.append('properties', 'name');
+    params.append('properties', 'winner');
+    params.append('properties', 'looser');
+    
+    const custom = `https://api.hubspot.com/crm/v3/objects/${objectId}`;
+    try {
+        const { data } = await axios.get(custom, { headers, params });
+        return data.results;
+        
+    } catch (error) {
+        console.log(error.data);
+    }
+
+    return false;
+};
